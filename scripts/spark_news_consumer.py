@@ -1,6 +1,8 @@
 import os
 import sys
 from pathlib import Path
+import findspark
+findspark.init()
 from pyspark.sql.functions import *
 from pyspark.sql.types import *
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
@@ -8,6 +10,7 @@ from pyspark.sql import DataFrame
 from cassandra.cluster import Cluster
 import urllib.request
 import json
+from textblob import TextBlob
 
 def setup_hadoop_binaries():
     """Download and setup Hadoop binaries for Windows"""
@@ -48,22 +51,36 @@ def create_spark_session():
         .master("local[*]") \
         .getOrCreate()
 
-def analyze_sentiment(text):
-    """Analyze sentiment of text using VADER"""
-    analyzer = SentimentIntensityAnalyzer()
-    sentiment = analyzer.polarity_scores(text)
-    return sentiment
 
-# Register UDF for sentiment analysis
+
+def analyze_sentiment(text):
+    """Analyze sentiment of text using TextBlob with enhanced processing"""
+    if not text:
+        return 0.0
+    
+    # Clean text - remove extra whitespace, convert to lowercase
+    text = ' '.join(text.split()).lower()
+    
+    blob = TextBlob(text)
+    # Get both polarity and subjectivity
+    polarity = blob.sentiment.polarity
+    subjectivity = blob.sentiment.subjectivity
+    
+    # Weight the sentiment by subjectivity
+    # This helps distinguish between factual and opinion-based content
+    weighted_sentiment = polarity * (0.5 + 0.5 * subjectivity)
+    
+    return weighted_sentiment
+
 def create_sentiment_udf():
-    """Create UDF for sentiment analysis"""
+    """Create UDF for sentiment analysis with TextBlob"""
     def get_sentiment(text):
         if text is None:
             return None
-        scores = analyze_sentiment(text)
-        return scores['compound']  # Return compound score
+        return analyze_sentiment(text)
     
     return udf(get_sentiment, DoubleType())
+
 
 def process_batch(df, epoch_id):
     """Process each batch of news data with sentiment analysis"""
@@ -84,8 +101,8 @@ def process_batch(df, epoch_id):
             .withColumn("overall_sentiment", 
                        (col("title_sentiment") + col("description_sentiment")) / 2) \
             .withColumn("sentiment_label", 
-                       when(col("overall_sentiment") >= 0.05, "positive")
-                       .when(col("overall_sentiment") <= -0.05, "negative")
+                       when(col("overall_sentiment") >= 0.1, "positive")
+                       .when(col("overall_sentiment") <= -0.1, "negative")
                        .otherwise("neutral"))
         
         # Calculate sentiment statistics per company
@@ -133,45 +150,54 @@ def save_to_cassandra(df: DataFrame, keyspace: str, table: str):
     # Create the table if it doesn't exist
     create_table_query = f"""
     CREATE TABLE IF NOT EXISTS {table} (
-        timestamp timestamp,
         company text,
-        title text,
+        timestamp timestamp,
         description text,
-        title_sentiment double,
-        description_sentiment double,
-        overall_sentiment double,
+        description_sentiment float,
+        overall_sentiment float,
         sentiment_label text,
-        PRIMARY KEY (timestamp, company)
+        title text,
+        title_sentiment float,
+        PRIMARY KEY (company, timestamp)
     )"""
     session.execute(create_table_query)
 
     # Insert data
     insert_query = session.prepare(
         f"""INSERT INTO {table} 
-            (timestamp, company, title, description, 
-             title_sentiment, description_sentiment, 
-             overall_sentiment, sentiment_label)
+            (company,timestamp, description, description_sentiment, overall_sentiment, sentiment_label, title, title_sentiment)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)"""
     )
 
     # Insert each row
     for row in df.collect():
         session.execute(insert_query, (
-            row.fetch_timestamp,
             row.company,
-            row.title,
+            row.fetch_timestamp,
             row.description,
-            row.title_sentiment,
             row.description_sentiment,
             row.overall_sentiment,
-            row.sentiment_label
+            row.sentiment_label,
+            row.title,
+            row.title_sentiment
         ))
 
     print(f"Sentiment data saved to table {table} under keyspace {keyspace}.")
 
+
+def setup_environment():
+    """Setup required environment and dependencies"""
+    import subprocess
+    
+    # Install required packages
+    subprocess.check_call(['pip', 'install', 'textblob'])
+    
+
+
 def start_streaming():
     """Start the streaming process"""
     try:
+        setup_environment()
         # Setup environment
         setup_hadoop_binaries()
         

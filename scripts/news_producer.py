@@ -89,7 +89,7 @@ def main():
         # Fetch news data
         news_data = scraper.fetch_stock_news(
             companies=companies,
-            days_back=1,  # Get today's news
+            days_back=15,  # Get today's news
             page_size=5   # 5 articles per company
         )
         

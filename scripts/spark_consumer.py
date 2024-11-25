@@ -102,7 +102,7 @@ def train_model(df):
     )
     
     model = rf.fit(train_df)
-    predictions = model.transform(test_df)
+    prediction = model.transform(test_df)
     
     # Evaluate model
     evaluator = RegressionEvaluator(
@@ -110,9 +110,9 @@ def train_model(df):
         predictionCol="prediction",
         metricName="rmse"
     )
-    rmse = evaluator.evaluate(predictions)
+    rmse = evaluator.evaluate(prediction)
     
-    return model, rmse, predictions
+    return model, rmse, prediction
 
 def process_batch(df, epoch_id):
     """Process each batch of data with time series analysis"""
@@ -128,33 +128,33 @@ def process_batch(df, epoch_id):
         
         # Train model if enough data
         if feature_df.count() > 10:
-            model, rmse, predictions = train_model(feature_df)
+            model, rmse, prediction = train_model(feature_df)
             
             print(f"\nBatch {epoch_id} Results:")
             print(f"RMSE: {rmse:.2f}")
             
-            # Show latest predictions
-            print("\nLatest Predictions vs Actual:")
-            predictions.select("timestamp", "symbol", "price", "prediction") \
+            # Show latest prediction
+            print("\nLatest prediction vs Actual:")
+            prediction.select("timestamp", "symbol", "price", "prediction") \
                 .orderBy(desc("timestamp")) \
                 .limit(5) \
                 .show()
             
             # Calculate prediction metrics
-            predictions = predictions.withColumn(
+            prediction = prediction.withColumn(
                 "prediction_error", 
                 abs(col("prediction") - col("price")) / col("price") * 100
             )
             
             print("\nPrediction Error Statistics:")
-            predictions.select(
+            prediction.select(
                 mean("prediction_error").alias("mean_error_percentage"),
                 max("prediction_error").alias("max_error_percentage"),
                 min("prediction_error").alias("min_error_percentage")
             ).show()
             
             # Save results to Cassandra
-            save_to_cassandra(predictions, 'stock_analysis', 'predictions')
+            save_to_cassandra(prediction, 'stock_analysis', 'prediction')
         
         else:
             print(f"Batch {epoch_id}: Not enough data for training (minimum 10 records needed)")
@@ -173,21 +173,21 @@ def save_to_cassandra(df: DataFrame, keyspace: str, table: str):
     # Create the table if it doesn't exist
     create_table_query = f"""
     CREATE TABLE IF NOT EXISTS {table} (
-        timestamp timestamp,
         symbol text,
-        price double,
-        volume double,
-        prediction double,
+        timestamp timestamp,
+        prediction float,
+        price float,
+        volume int,
         PRIMARY KEY (timestamp, symbol)
     )"""
     session.execute(create_table_query)
 
     # Insert data
-    insert_query = session.prepare(f"INSERT INTO {table} (timestamp, symbol, price, prediction, volume) VALUES (?, ?, ?, ?, ?)")
+    insert_query = session.prepare(f"INSERT INTO {table} (timestamp, symbol, prediction, price, volume) VALUES (?, ?, ?, ?, ?)")
 
     # Use a batch for efficiency
     for row in df.collect():
-        session.execute(insert_query, (row.timestamp, row.symbol, row.price, row.volume, row.prediction))
+        session.execute(insert_query, (row.timestamp, row.symbol, row.prediction, row.price, int(row.volume)))
 
     print(f"Data saved to table {table} under keyspace {keyspace}.")
 
