@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import GaugeChart from 'react-gauge-chart';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -32,11 +33,18 @@ const companies = [
   { symbol: 'MSFT', name: 'Microsoft Corporation' },
   { symbol: 'GOOGL', name: 'Alphabet Inc.' },
   { symbol: 'AMZN', name: 'Amazon.com Inc.' },
-  { symbol: 'META', name: 'Meta Platforms Inc.' },
-  { symbol: 'NVDA', name: 'NVIDIA Corporation' },
-  { symbol: 'TSLA', name: 'Tesla Inc.' },
-  { symbol: 'JPM', name: 'JPMorgan Chase & Co.' },
+  // { symbol: 'META', name: 'Meta Platforms Inc.' },
+  // { symbol: 'NVDA', name: 'NVIDIA Corporation' },
+  // { symbol: 'TSLA', name: 'Tesla Inc.' },
+  // { symbol: 'JPM', name: 'JPMorgan Chase & Co.' },
 ];
+
+const getSentimentType = (score) => {
+  if (score > 0.2) return "Positive";
+  if (score < -0.2) return "Negative";
+  return "Neutral";
+};
+
 
 const StockDashboard = () => {
   const [selectedCompany, setSelectedCompany] = useState(companies[0].symbol);
@@ -70,10 +78,26 @@ const StockDashboard = () => {
   const labels = data.map(item => item.date);
   const stockPrices = data.map(item => item.price);
   const tradingVolumes = data.map(item => item.volume);
-  const sentimentScores = data.map(item => item.overallSentiment);
-  const predictions = data.map(item => item.prediction);
-  console.log(stockPrices);
+  const predictions = data.map(item => item.finalPrediction);
+  const latestSentimentScore = data.length > 0 ? data[data.length - 1].sentiment : data[data.length].sentiment;
 
+  const SentimentGauge = ({ score }) => {
+    const normalizedScore = (score + 1) / 2; // Normalize -1 to 1 into 0 to 1
+    return (
+      <div className="sentiment-gauge">
+        <h2>Sentiment Score</h2>
+        <GaugeChart 
+          id="sentiment-gauge"
+          nrOfLevels={30}
+          colors={["#dc2626", "#fbbf24", "#16a34a"]}
+          percent={normalizedScore || 0.5}
+          textColor="#333"
+        />
+        <p className="sentiment-label">Current Sentiment: {getSentimentType(score)}</p>
+      </div>
+    );
+  };
+  
   // Chart configurations
   const commonOptions = {
     responsive: true,
@@ -105,19 +129,6 @@ const StockDashboard = () => {
         label: 'Trading Volume',
         data: tradingVolumes,
         backgroundColor: 'rgba(59, 130, 246, 0.8)',
-      },
-    ],
-  };
-
-  const sentimentChartData = {
-    labels,
-    datasets: [
-      {
-        label: 'Sentiment Score',
-        data: sentimentScores,
-        borderColor: 'rgb(16, 185, 129)',
-        backgroundColor: 'rgba(16, 185, 129, 0.1)',
-        fill: true,
       },
     ],
   };
@@ -186,24 +197,12 @@ const StockDashboard = () => {
                 <Bar data={volumeChartData} options={commonOptions} />
               </div>
             </div>
-
+            
             <div className="chart-container">
-              <h2 className="chart-title">News Sentiment Analysis</h2>
-              <div className="chart-wrapper">
-                <Line
-                  data={sentimentChartData}
-                  options={{
-                    ...commonOptions,
-                    scales: {
-                      y: {
-                        min: -1,
-                        max: 1,
-                      },
-                    },
-                  }}
-                />
-              </div>
+              <SentimentGauge score={latestSentimentScore} />
             </div>
+
+            
 
             <div className="chart-container">
               <h2 className="chart-title">Combined Analysis & Prediction</h2>

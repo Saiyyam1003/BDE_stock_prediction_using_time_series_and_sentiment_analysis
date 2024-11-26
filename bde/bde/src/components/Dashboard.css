@@ -55,6 +55,15 @@
       grid-template-columns: repeat(4, 1fr);
     }
   }
+  .sentiment-gauge {
+    text-align: center;
+    margin-top: 20px;
+  }
+  
+  .sentiment-label {
+    font-size: 1rem;
+    margin-top: 10px;
+  }
   
   /* Company Button Styles */
   .company-button {

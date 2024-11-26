@@ -72,7 +72,7 @@ def run_continuous_producer(symbols=['AAPL'], interval_seconds=300):
 
 if __name__ == "__main__":
     # List of stock symbols to track
-    SYMBOLS = ['AAPL', 'GOOGL', 'MSFT']
+    SYMBOLS = ['AAPL', 'GOOGL', 'MSFT', 'TSLA']
     
     # Run the producer with 1-minute updates
     run_continuous_producer(symbols=SYMBOLS, interval_seconds=300)

@@ -162,9 +162,6 @@ def process_batch(df, epoch_id):
     except Exception as e:
         print(f"Error processing batch {epoch_id}: {str(e)}")
 
-
-
-
 def save_to_cassandra(df: DataFrame, keyspace: str, table: str):
     # Connect to the Cassandra cluster
     cluster = Cluster(['localhost'], port=9042)

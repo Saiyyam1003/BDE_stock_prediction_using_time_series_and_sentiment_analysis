@@ -2,6 +2,8 @@ const express = require('express');
 const cassandra = require('cassandra-driver');
 const cors = require('cors');
 const morgan = require('morgan');
+const fs = require('fs').promises;
+const path = require('path');
 
 const app = express();
 const port = 3001;
@@ -9,7 +11,11 @@ const port = 3001;
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(morgan('dev')); // Logging middleware
+app.use(morgan('dev'));
+
+
+
+const DATA_FILE = 'market_data.json';
 
 // Cassandra connection setup
 const client = new cassandra.Client({
@@ -36,6 +42,39 @@ client.connect()
         process.exit(1);
     });
 
+// Function to load coefficients
+async function loadCoefficients() {
+    try {
+        const data = await fs.readFile(path.join(__dirname, 'coefficients.json'), 'utf8');
+        return JSON.parse(data);
+    } catch (error) {
+        console.warn('Could not load coefficients, using defaults:', error.message);
+        return { x: 0.5, y: 0.3, z: 0.2 }; // Default values
+    }
+}
+
+
+async function loadOrCreateMarketData() {
+    try {
+        const data = await fs.readFile(DATA_FILE, 'utf8');
+        return JSON.parse(data);
+    } catch (error) {
+        return null;
+    }
+}
+
+// Function to save market data
+async function saveMarketData(data) {
+    await fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2));
+    console.log(`Market data saved to ${DATA_FILE}`);
+}
+
+// Calculate final prediction using the non-linear formula
+function calculateFinalPrediction(prediction, sentiment, coeffs) {
+    const { x, y, z } = coeffs;
+    return x * prediction + y * sentiment + z * (prediction * sentiment);
+}
+
 // Queries
 const FETCH_QUERY = `
     SELECT timestamp, price, symbol, volume, prediction 
@@ -57,6 +96,9 @@ app.get('/api/data/:symbol', async (req, res) => {
 
 
     try {
+        // Load coefficients
+        
+
         // Fetch stock data and news data concurrently
         const [stockResult, newsResult] = await Promise.all([
             client.execute(FETCH_QUERY, [symbol], { prepare: true }),
@@ -69,57 +111,47 @@ app.get('/api/data/:symbol', async (req, res) => {
                 message: `No data found for symbol ${symbol}`
             });
         }
+
+        const newsData = newsResult.rows.map(row => {
+            const date = row.timestamp.toISOString().split('T')[0];
+            return {
+                date: date,
+                company: row.company,
+                sentiment: parseFloat(row.overall_sentiment) || 0, // Default to 0 if sentiment is null/undefined
+            };
+        });
+        
+        // Map sentiment by company (or company and date if needed)
+        const sentimentMap = newsData.reduce((acc, item) => {
+            acc[item.company] = item.sentiment; // Overwrite sentiment if multiple entries exist
+            return acc;
+        }, {});
+        
         const combinedData = stockResult.rows.map(row => {
             const date = row.timestamp.toISOString().split('T')[0];
-            const newsForDate = newsResult.rows.find(newsRow => 
-                newsRow.timestamp.toISOString().split('T')[0] === date
-            );
-        
+            const sentiment = sentimentMap[row.symbol] || 0; // Default to 0 if no sentiment found for the company
+            
+            const rawPrediction = parseFloat(row.prediction);
+            const finalPrediction = rawPrediction * 1 + sentiment * 0.00; // Apply the formula
+
             return {
                 date: date,
                 price: parseFloat(row.price),
                 symbol: row.symbol,
                 volume: parseInt(row.volume),
-                prediction: parseFloat(row.prediction),
-                overallSentiment: newsForDate ? parseFloat(newsForDate.overall_sentiment) : null // Add overall sentiment
+                rawPrediction: parseFloat(row.prediction),
+                sentiment: sentiment,
+                finalPrediction : finalPrediction
             };
-        }); 
+        });
+        
+        console.log("Combined Data:", combinedData);
+
+        
         res.json({
             status: 'success',
-            data: combinedData
+            data: combinedData 
         });
-
-        // Transform stock data
-        // const stockData = stockResult.rows.map(row => ({
-        //     date: row.timestamp.toISOString().split('T')[0],
-        //     price: parseFloat(row.price),
-        //     symbol: row.symbol,
-        //     volume: parseInt(row.volume),
-        //     prediction: parseFloat(row.prediction)
-        // }));
-
-        // // Transform news data
-        // const newsData = newsResult.rows.map(row => ({
-        //     date: row.timestamp.toISOString().split('T')[0],
-        //     company: row.company,
-        //     title: row.title,
-        //     description: row.description,
-        //     sentiment: {
-        //         title: parseFloat(row.title_sentiment),
-        //         description: parseFloat(row.description_sentiment),
-        //         overall: parseFloat(row.overall_sentiment),
-        //         label: row.sentiment_label
-        //     }
-        // }));
-        // console.log(stockData,newsData);
-
-        // res.json({
-        //     status: 'success',
-        //     data: {
-        //         stock: stockData,
-        //         news: newsData
-        //     }
-        // });
 
     } catch (err) {
         console.error(`Error fetching data for ${symbol}:`, err);
@@ -131,7 +163,7 @@ app.get('/api/data/:symbol', async (req, res) => {
     }
 });
 
-// API to get the list of companies
+// Rest of the code remains the same...
 app.get('/api/companies', (req, res) => {
     const companies = [
         { symbol: 'AAPL', name: 'Apple Inc.' },
@@ -175,9 +207,8 @@ async function shutdown() {
     }
 }
 
-// Start the server
 app.listen(port, () => {
     console.log(`Server is running on http://localhost:${port}`);
 });
 
-module.exports = app; // For testing purposes
+module.exports = app;

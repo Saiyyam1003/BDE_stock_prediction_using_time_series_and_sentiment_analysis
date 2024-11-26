@@ -51,8 +51,6 @@ def create_spark_session():
         .master("local[*]") \
         .getOrCreate()
 
-
-
 def analyze_sentiment(text):
     """Analyze sentiment of text using TextBlob with enhanced processing"""
     if not text:
@@ -80,7 +78,6 @@ def create_sentiment_udf():
         return analyze_sentiment(text)
     
     return udf(get_sentiment, DoubleType())
-
 
 def process_batch(df, epoch_id):
     """Process each batch of news data with sentiment analysis"""
@@ -184,7 +181,6 @@ def save_to_cassandra(df: DataFrame, keyspace: str, table: str):
 
     print(f"Sentiment data saved to table {table} under keyspace {keyspace}.")
 
-
 def setup_environment():
     """Setup required environment and dependencies"""
     import subprocess
@@ -192,8 +188,6 @@ def setup_environment():
     # Install required packages
     subprocess.check_call(['pip', 'install', 'textblob'])
     
-
-
 def start_streaming():
     """Start the streaming process"""
     try:
